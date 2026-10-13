@@ -1,0 +1,23 @@
+name: fastapi-hello
+base: bare
+build-base: ubuntu@24.04
+version: '0.1'
+summary: Minimal FastAPI hello-world rock on a chiselled bare base
+description: |
+  A FastAPI hello-world app packaged as a chiselled Ubuntu rock, used to
+  practise rock builds, SBOM generation, CVE scanning, and image signing.
+
+platforms:
+  amd64:
+  arm64:
+
+extensions:
+  - fastapi-framework
+
+parts:
+  # Writes /var/lib/chisel/manifest.wall. It only lists this part's slices;
+  # see NOTES.md section 4.
+  chisel-manifest:
+    plugin: nil
+    stage-packages:
+      - base-files_chisel

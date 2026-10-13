@@ -1,0 +1,4 @@
+*.rock
+__pycache__/
+.venv/
+keys/

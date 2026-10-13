@@ -1,0 +1,1 @@
+localhost:5050/fastapi-hello@sha256:d442391ecca6b7fcd09a4bdd77366ee97c8bad4ca6c48a2397c7f8eaf24261dd

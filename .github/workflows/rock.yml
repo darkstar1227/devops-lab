@@ -1,0 +1,104 @@
+name: Build, scan, and sign rock
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/fastapi-hello
+
+jobs:
+  pack:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack rock
+        id: pack
+        uses: canonical/craft-actions/rockcraft-pack@v0.1.1
+
+      - name: Push per-arch image
+        if: github.event_name != 'pull_request'
+        env:
+          ROCK: ${{ steps.pack.outputs.rock }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | rockcraft.skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
+          rockcraft.skopeo --insecure-policy copy \
+            "oci-archive:${ROCK}" \
+            "docker://${IMAGE}:${GITHUB_SHA}-${{ matrix.arch }}"
+
+  publish:
+    needs: pack
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless cosign signing via GitHub OIDC
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Create multi-arch manifest
+        id: manifest
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE}:${GITHUB_SHA}" -t "${IMAGE}:latest" \
+            "${IMAGE}:${GITHUB_SHA}-amd64" "${IMAGE}:${GITHUB_SHA}-arm64"
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${GITHUB_SHA}" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "${IMAGE}:${GITHUB_SHA}"
+
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: ${{ steps.manifest.outputs.ref }}
+          scanners: vuln
+          format: table
+          exit-code: '0' # report only; see NOTES.md on OS package visibility
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0.24.3
+        with:
+          image: ${{ steps.manifest.outputs.ref }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Sign image and attest SBOM (keyless)
+        env:
+          REF: ${{ steps.manifest.outputs.ref }}
+        run: |
+          cosign sign --yes "$REF"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$REF"
+
+      - name: Verify signature and attestation
+        env:
+          REF: ${{ steps.manifest.outputs.ref }}
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          cosign verify "$REF" \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          cosign verify-attestation "$REF" --type spdxjson \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
