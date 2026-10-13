@@ -51,7 +51,17 @@ Script: `scripts/sign-and-verify.sh` (cosign v2.4.1 in a container, `registry:2`
 - The registry now holds tags `0.1`, `sha256-<digest>.sig`, and `sha256-<digest>.att`: cosign stores signatures and attestations as OCI artifacts next to the image.
 - Gotcha: cosign treats only `localhost` as plain-HTTP. A registry reached as `reg:5000` on a Docker network fails with "server gave HTTP response to HTTPS client" even with `--allow-insecure-registry`.
 
+## 6. CI: multi-arch build, scan, keyless signing (GitHub Actions)
+
+Workflow: `.github/workflows/rock.yml`. First green run: 38396156513 (2026-10-13).
+
+- `pack` matrix builds amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm` (native runners, no QEMU) with `canonical/craft-actions/rockcraft-pack`, then pushes `:<sha>-<arch>` to GHCR with `rockcraft.skopeo`.
+- `publish` joins both into one manifest list (`linux/amd64`, `linux/arm64`) with `docker buildx imagetools create`, tagged `:<sha>` and `:latest`.
+- Trivy on the published image: Python packages 6 (5 MEDIUM, 1 LOW), Pebble Go binary 13 (3 HIGH). Same OS-package blind spot as section 4.
+- syft SPDX SBOM, then `cosign sign` and `cosign attest --type spdxjson` keyless through GitHub OIDC (Fulcio certificate, Rekor entry). `cosign verify` and `verify-attestation` pin the certificate identity to the workflow ref and the issuer `token.actions.githubusercontent.com`.
+- Gotcha: `aquasecurity/trivy-action` tags start with `v` (`v0.36.0`); `@0.36.0` fails at job setup.
+
 ## Next
 
-- GitHub Actions: multi-arch build, scan, sign.
+- Close the OS-package gap: one chisel manifest covering every part, and check which scanner versions read it.: multi-arch build, scan, sign.
 - Optional: a minimal .deb package.
