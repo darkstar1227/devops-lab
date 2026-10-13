@@ -63,5 +63,5 @@ Workflow: `.github/workflows/rock.yml`. First green run: 38396156513 (2026-10-13
 
 ## Next
 
-- Close the OS-package gap: one chisel manifest covering every part, and check which scanner versions read it.: multi-arch build, scan, sign.
+- Close the OS-package gap: one chisel manifest covering every part, and check which scanner versions read it.
 - Optional: a minimal .deb package.
