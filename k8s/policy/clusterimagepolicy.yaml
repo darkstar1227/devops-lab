@@ -1,0 +1,31 @@
+# Admit ghcr.io/darkstar1227/* images only if they carry a keyless cosign
+# signature and an SPDX SBOM attestation, both made by this repo's rock.yml
+# workflow on main through GitHub OIDC.
+#
+# CI uses cosign v3, which stores signatures as Sigstore bundles in OCI
+# referrers, not as legacy `.sig` tags. policy-controller 0.13.1 only reads
+# bundles through its attestation path, so the signature is checked as an
+# attestation with predicate type https://sigstore.dev/cosign/sign/v1.
+# Workaround from sigstore/policy-controller issue 1899.
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: darkstar1227-keyless
+spec:
+  mode: enforce
+  images:
+    - glob: "ghcr.io/darkstar1227/**"
+  authorities:
+    - keyless:
+        url: https://fulcio.sigstore.dev
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            subjectRegExp: ^https://github\.com/darkstar1227/devops-lab/\.github/workflows/rock\.yml@refs/heads/main$
+      ctlog:
+        url: https://rekor.sigstore.dev
+      signatureFormat: bundle
+      attestations:
+        - name: cosign-signature
+          predicateType: https://sigstore.dev/cosign/sign/v1
+        - name: spdx-sbom
+          predicateType: https://spdx.dev/Document

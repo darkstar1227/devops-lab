@@ -28,13 +28,15 @@ jobs:
       - name: Pack rock
         id: pack
         uses: canonical/craft-actions/rockcraft-pack@v0.1.1
+        with:
+          path: rock
 
       - name: Push per-arch image
         if: github.event_name != 'pull_request'
         env:
-          ROCK: ${{ steps.pack.outputs.rock }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          ROCK=$(find . -maxdepth 2 -name '*.rock' | head -1)
           echo "$TOKEN" | rockcraft.skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
           rockcraft.skopeo --insecure-policy copy \
             "oci-archive:${ROCK}" \

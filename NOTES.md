@@ -1,6 +1,8 @@
-# rock-lab notes
+# devops-lab notes
 
-Hands-on lab for Canonical Rocks (chiselled Ubuntu OCI images). Host: macOS, OrbStack Ubuntu 24.04 arm64 VM `rocklab`.
+Personal learning lab. Sections 1-6 (2026-10-13) cover Canonical Rocks and the image supply chain; they were written when the repo was called `rock-lab`, and the rock files now live in `rock/`. Phase 2 (sections 7+) adds Kubernetes, Terraform, and more CI. Everything runs on a laptop; nothing here is production.
+
+Host: macOS (Apple Silicon), OrbStack 2.2.3. Phase 1 built in the OrbStack Ubuntu 24.04 arm64 VM `rocklab`.
 
 ## 1. Build and run (2026-10-13)
 
@@ -60,6 +62,72 @@ Workflow: `.github/workflows/rock.yml`. First green run: 38396156513 (2026-10-13
 - Trivy on the published image: Python packages 6 (5 MEDIUM, 1 LOW), Pebble Go binary 13 (3 HIGH). Same OS-package blind spot as section 4.
 - syft SPDX SBOM, then `cosign sign` and `cosign attest --type spdxjson` keyless through GitHub OIDC (Fulcio certificate, Rekor entry). `cosign verify` and `verify-attestation` pin the certificate identity to the workflow ref and the issuer `token.actions.githubusercontent.com`.
 - Gotcha: `aquasecurity/trivy-action` tags start with `v` (`v0.36.0`); `@0.36.0` fails at job setup.
+
+## 7. Kubernetes: hardened deployment and signature admission (2026-10-15)
+
+Cluster: OrbStack built-in Kubernetes, single node, `v1.35.6+orb1` (k3s-based, Docker runtime, arm64). Tools: kubectl, Helm 4.3.1, cosign 3.1.3, kubeconform 0.8.0.
+
+### Repo rename and re-signing
+
+- `gh repo rename devops-lab`. The keyless certificate identity contains the repo name, so the existing image (`sha256:c3db2314...`) is signed as `https://github.com/darkstar1227/rock-lab/.github/workflows/rock.yml@refs/heads/main`.
+- Re-ran CI on main (`gh workflow run`, run 38753005081, success). New index digest `sha256:f3f15cb9...`, signed as `.../devops-lab/.github/workflows/rock.yml@refs/heads/main`. `cosign verify` with the devops-lab regexp passes on the new digest and fails on the old one with `expected SAN value to match regex ... got ".../rock-lab/..."`.
+- Rock files moved to `rock/`; CI `rockcraft-pack` now gets `path: rock`. Not yet run in CI with the new layout (pending push).
+
+### Manifests (`k8s/app/`, applied with `kubectl apply -k`)
+
+- Namespace `hello`, labels `policy.sigstore.dev/include=true` and Pod Security Admission `enforce: restricted`.
+- Deployment: 2 replicas, image pinned by digest, `runAsNonRoot`, uid/gid 584792 (`_daemon_`), `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, drop ALL capabilities, seccomp `RuntimeDefault`, no service-account token. HTTP readiness and liveness probes on `/healthz`. Requests 50m/64Mi, limits 250m/192Mi.
+- NetworkPolicies: default deny ingress and egress for the namespace; app ingress on port 8000 only from pods labelled `hello-client=true` and from namespace `monitoring`; pods labelled `role=client` may reach DNS and the app.
+
+Gotcha: Pebble will not start on a read-only root filesystem (`cannot run daemon: directory "/var/lib/pebble/default" not writable`). `PEBBLE_PERSIST=never` and `PEBBLE_SOCKET` did not help. Fix: an init container (same image, `cp -r /var/lib/pebble/default/layers`) copies the layer files into an emptyDir that is mounted over `/var/lib/pebble/default`; `/tmp` is another emptyDir. Tested first with `docker run --read-only --cap-drop ALL`.
+
+Checked that OrbStack enforces NetworkPolicy before relying on it: in a scratch namespace, a busybox `wget` to nginx went from allowed to blocked after a deny policy.
+
+### Signature admission: Sigstore policy-controller (not Kyverno)
+
+Why policy-controller: the only goal here is "reject images without a valid keyless cosign signature". policy-controller is maintained by the Sigstore project for exactly that, is one small webhook, and is opt-in per namespace by label. Kyverno would also work and adds general policies, but that is more than this lab needs, and Pod Security Admission already covers the pod-hardening rules.
+
+- Helm chart `sigstore/policy-controller` 0.10.8 (app 0.13.1), `no-match-policy: deny` (`k8s/policy/values.yaml`).
+- `ClusterImagePolicy` for `ghcr.io/darkstar1227/**`: keyless, issuer `https://token.actions.githubusercontent.com`, subject pinned to `^https://github\.com/darkstar1227/devops-lab/\.github/workflows/rock\.yml@refs/heads/main$`, Rekor ctlog.
+- Gotcha: the first policy denied the correctly signed image with `no signatures found`. CI's cosign is v3.0.6 (installer v4.1.2); cosign v3 stores signatures as Sigstore bundles in OCI referrers (`cosign tree` shows `https://sigstore.dev/cosign/sign/v1 artifacts via OCI referrer`), not as `.sig` tags. policy-controller 0.13.1 reads bundles only through its attestation path. Workaround (sigstore/policy-controller issue 1899): `signatureFormat: bundle` plus an attestation with predicate type `https://sigstore.dev/cosign/sign/v1`. The policy also requires the SPDX SBOM attestation (`https://spdx.dev/Document`) that CI already produces.
+
+Admission results (`kubectl -n hello create deployment ... --dry-run=server`):
+
+| Image | Result |
+|---|---|
+| `fastapi-hello@sha256:f3f15cb9...` (signed by devops-lab CI) | admitted |
+| `fastapi-hello@sha256:eca0f5b6...` (per-arch arm64 manifest from the same build; CI signs only the index, so this digest has no signature) | denied: `no valid bundles exist in registry` |
+| `nginx:1.27-alpine` (no policy matches) | denied: `no matching policies` |
+| `fastapi-hello@sha256:c3db2314...` (signed, but as rock-lab) | denied: `no matching CertificateIdentity found ... got ".../rock-lab/..."` |
+
+Pod Security Admission also rejected a bare `kubectl run` of the signed image: `violates PodSecurity "restricted:latest"`.
+
+### Smoke test (`k8s/smoke-test.sh`, exit 0 on OrbStack)
+
+```
+PASS: 2/2 replicas ready
+PASS: labelled client reached /healthz: {"status":"ok"}
+PASS: client without hello-client=true blocked by ingress NetworkPolicy
+PASS: PID 1 (pebble) runs as uid 584792
+PASS: app egress to 1.1.1.1 blocked
+PASS: root filesystem is read-only
+```
+
+- Clients are pods built from the app image (it has python3), so they pass the signature policy and Pod Security `restricted`.
+- Gotcha 1: the first run failed with `Connection refused` for the allowed client. The namespace default deny also blocks the client's own egress (DNS included), so the "blocked" result for the unlabelled client proved nothing. Added the `client-egress` policy; now both clients have egress, and only the ingress rule separates them.
+- Gotcha 2: a brand-new pod was sometimes refused for its first requests until the network policy controller had programmed rules for its IP. The client retries for up to 10 s.
+- `grep` is not in the chiselled image; the UID check reads `/proc/1/status` with bash builtins.
+
+### Manifest validation
+
+- `kubectl kustomize k8s/app | kubeconform -strict -kubernetes-version 1.35.0`: 6 valid.
+- The community CRDs-catalog schema for `ClusterImagePolicy` v1beta1 rejects `signatureFormat`, but the live CRD accepts it (catalog out of date). `k8s/schemas/generate.py` builds strict schemas from the chart's own CRDs (`helm template ... | python3 k8s/schemas/generate.py`). With them the policy validates, and a typo (`signatureFormt`) is caught as `additional properties ... not allowed`.
+
+### Not verified
+
+- Liveness probe restarts were not exercised. Pebble restarts a crashed uvicorn itself, so the probe would only fire on a hang.
+- Single node, so spreading replicas across nodes and disruption budgets were not tested.
+- policy-controller is installed by hand (README commands), not by Terraform.
 
 ## Next
 

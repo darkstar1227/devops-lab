@@ -1,0 +1,6 @@
+# Helm values for sigstore/policy-controller (chart 0.10.8).
+webhook:
+  configData:
+    # In namespaces labelled policy.sigstore.dev/include=true, reject any
+    # image that no ClusterImagePolicy matches.
+    no-match-policy: deny
