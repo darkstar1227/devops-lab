@@ -129,6 +129,50 @@ PASS: root filesystem is read-only
 - Single node, so spreading replicas across nodes and disruption budgets were not tested.
 - policy-controller is installed by hand (README commands), not by Terraform.
 
+## 8. Terraform: app and monitoring on OrbStack (2026-10-15)
+
+Terraform 1.16.6 (official zip, SHA256 checked; the GPG signature on SHA256SUMS was not checked). Providers: kubernetes 3.3.0, helm 3.3.0, random 3.9.1. Local state only (`terraform.tfstate` is gitignored).
+
+### What `terraform/` manages (11 resources)
+
+- The app: Terraform decodes `k8s/app/*.yaml` with `provider::kubernetes::manifest_decode(_multi)`, so kubectl and Terraform share one copy of the manifests. The Deployment uses `wait { rollout = true }`.
+- The `monitoring` namespace, plus kube-prometheus-stack 92.8.0 with alertmanager off. The k3s control-plane targets (controller-manager, scheduler, etcd, kube-proxy) are disabled because OrbStack does not expose them separately.
+- The app's own `/metrics`: rock/app.py gained a prometheus_client counter and histogram (`http_requests_total` and `http_request_duration_seconds`, labelled by route template). CI run 38757050915 rebuilt and re-signed the image. The new digest `sha256:d895d1a8…` passed `cosign verify` against the devops-lab identity before I pinned it. Prometheus scrapes it through `additionalServiceMonitors`.
+- A black-box view: prometheus-blackbox-exporter 11.20.0 probes `http://fastapi-hello.hello.svc.cluster.local/healthz` (module http_2xx, every 15s).
+- A Grafana dashboard, `fastapi-hello`, loaded by the sidecar from a ConfigMap. It has 5 panels: probe up/down, probe duration, request rate, p95 latency and pod memory.
+- The Grafana admin password comes from `random_password` (output marked sensitive).
+- The app's ingress NetworkPolicy already admitted the `monitoring` namespace, so no policy change was needed for scraping.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `terraform validate`, first `plan` | valid; 11 to add |
+| First `apply` (Stage 1 kubectl objects deleted first) | 11 added in 1m48s |
+| Prometheus `/api/v1/targets` | both app pods (`:8000/metrics`) and the blackbox probe `up` |
+| `up{namespace="hello"}` / `probe_success{target="fastapi-hello-healthz"}` | 1 for both pods / 1 |
+| `http_requests_total` | `/healthz` 200 counted, from kubelet probes; `/metrics` correctly excluded |
+| Grafana API | `prometheus` datasource present; dashboard `fastapi-hello` with 5 panels; panel 1 query through `/api/ds/query` returned 1 |
+| `k8s/smoke-test.sh` | 6 PASS |
+| `terraform destroy` | 11 destroyed in 33s; `hello` and `monitoring` namespaces gone |
+| `terraform apply` again | 11 added in 60s (images cached) |
+| `terraform plan -detailed-exitcode` right after | exit 0 (no drift) |
+| After rebuild: targets + smoke test | 3/3 targets up; 6 PASS |
+
+### Gotchas
+
+- Helm leaves CRDs behind: after destroy, 10 `monitoring.coreos.com` CRDs remain. That's standard Helm behaviour; the next apply reuses them. Removing them fully is a manual `kubectl delete crd`.
+- A mounted ASGI `/metrics` app (`make_asgi_app`) redirected `/metrics` to `/metrics/` with a 307 and counted itself as `unmatched`. A plain route, skipped in the middleware, fixed both.
+- `*SelectorNilUsesHelmValues: false` is needed, or Prometheus ignores the blackbox chart's ServiceMonitor (different Helm release label).
+- Grafana also lists an `alertmanager` datasource even with alertmanager disabled. It's harmless and I left it.
+
+### Not verified
+
+- No Grafana alert rules or Prometheus alerting; the dashboard was checked by API, not by eye.
+- No remote state or locking; there's one local state file on one laptop.
+- No load test; latency panels only see probe traffic.
+- policy-controller is still outside Terraform, so `terraform destroy` leaves it, and its `no-match-policy: deny` still applies to the `hello` namespace.
+
 ## Next
 
 - Close the OS-package gap: one chisel manifest covering every part, and check which scanner versions read it.

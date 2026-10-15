@@ -1,0 +1,11 @@
+# prometheus-blackbox-exporter 11.20.0: probe the app's /healthz through its
+# Service. The chart turns each target into a ServiceMonitor.
+serviceMonitor:
+  enabled: true
+  defaults:
+    interval: 15s
+    scrapeTimeout: 10s
+    module: http_2xx
+  targets:
+    - name: fastapi-hello-healthz
+      url: http://fastapi-hello.hello.svc.cluster.local/healthz

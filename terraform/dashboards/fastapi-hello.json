@@ -1,0 +1,51 @@
+{
+  "uid": "fastapi-hello",
+  "title": "fastapi-hello",
+  "tags": ["devops-lab"],
+  "schemaVersion": 39,
+  "time": {"from": "now-30m", "to": "now"},
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "/healthz probe (blackbox)",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "min(probe_success{target=\"fastapi-hello-healthz\"})"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]}, "overrides": []}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Probe duration (s)",
+      "gridPos": {"x": 6, "y": 0, "w": 18, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "probe_duration_seconds{target=\"fastapi-hello-healthz\"}", "legendFormat": "probe"}]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Requests per second by path and status",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (path, status) (rate(http_requests_total{namespace=\"hello\"}[2m]))", "legendFormat": "{{path}} {{status}}"}]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "p95 latency by path (s)",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, path) (rate(http_request_duration_seconds_bucket{namespace=\"hello\"}[5m])))", "legendFormat": "{{path}}"}]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pod memory working set (bytes)",
+      "gridPos": {"x": 0, "y": 14, "w": 24, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"hello\", container=\"app\"})", "legendFormat": "{{pod}}"}]
+    }
+  ]
+}

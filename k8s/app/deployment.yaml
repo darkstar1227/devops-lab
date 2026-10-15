@@ -28,7 +28,7 @@ spec:
       # files into an emptyDir and mount that over the Pebble directory.
       initContainers:
         - name: pebble-layers
-          image: ghcr.io/darkstar1227/fastapi-hello@sha256:f3f15cb918b52ad3d9c46fe3aab0835f8472ad6ddf2fab00e6bd6452c1848b54
+          image: ghcr.io/darkstar1227/fastapi-hello@sha256:d895d1a8448333b7d2122f2504da044e29aaa87eeb5421510927271ade4f8c2b
           command: [/usr/bin/cp, -r, /var/lib/pebble/default/layers, /pebble/]
           securityContext:
             allowPrivilegeEscalation: false
@@ -43,7 +43,7 @@ spec:
               mountPath: /pebble
       containers:
         - name: app
-          image: ghcr.io/darkstar1227/fastapi-hello@sha256:f3f15cb918b52ad3d9c46fe3aab0835f8472ad6ddf2fab00e6bd6452c1848b54
+          image: ghcr.io/darkstar1227/fastapi-hello@sha256:d895d1a8448333b7d2122f2504da044e29aaa87eeb5421510927271ade4f8c2b
           ports:
             - name: http
               containerPort: 8000

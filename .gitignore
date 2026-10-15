@@ -2,3 +2,8 @@
 __pycache__/
 .venv/
 keys/
+
+# Terraform (local state stays local)
+.terraform/
+*.tfstate
+*.tfstate.*

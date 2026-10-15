@@ -1,0 +1,48 @@
+# kube-prometheus-stack 92.8.0, sized for a single-node laptop cluster.
+
+# No alert routing in this lab.
+alertmanager:
+  enabled: false
+
+# k3s (OrbStack) runs these inside one process and does not expose them as
+# separate scrape targets; leaving them on only produces down targets.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    # Pick up ServiceMonitors/Probes from any release, not only this one
+    # (the blackbox exporter chart creates its own ServiceMonitor).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+  # Scrape the app's own /metrics through its Service (port name "http").
+  additionalServiceMonitors:
+    - name: fastapi-hello
+      namespaceSelector:
+        matchNames: [hello]
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: fastapi-hello
+      endpoints:
+        - port: http
+          path: /metrics
+          interval: 15s
+
+grafana:
+  # Dashboards come from ConfigMaps labelled grafana_dashboard=1 (chart default).
+  sidecar:
+    dashboards:
+      enabled: true
