@@ -204,9 +204,21 @@ k8s/kind-e2e.sh total                         6m24s, exit 0
 - The validate steps (fmt, kubeconform on both inputs) were run locally and passed.
 - The OrbStack stack was destroyed for the kind run (the VM has 4 GB) and re-applied afterwards: 11 added in 59s, smoke test 6 PASS.
 
-### Not verified (yet)
+### Verified on GitHub Actions (amd64)
 
-- The workflow itself on GitHub runners (amd64): see the CI run result below once pushed.
+First run, commit af48369, run 38844369438: both jobs green.
+
+- `validate` (18s): kubeconform found 6/6 resources valid in `k8s/app` and 1/1 valid in the ClusterImagePolicy.
+- `kind-e2e` (3m22s):
+  - terraform apply: 11 added.
+  - Both admission denials PASS.
+  - The blackbox probe and 2 app `/metrics` targets are up.
+  - Smoke test: 6/6 PASS, including both NetworkPolicy blocks.
+
+The same push re-ran `rock.yml` (run 38844369526, green), because that workflow has no path filter. It produced a newly signed image. The deployment still pins `sha256:d895d1a8…`.
+
+### Not verified
+
 - No `terraform plan` against real state in CI; validate uses `-backend=false`.
 - The e2e cluster lives for one job; nothing tests upgrades or a second apply.
 
