@@ -7,7 +7,7 @@ A personal learning lab (renamed from `rock-lab` on 2026-10-15). One FastAPI hel
 | [`rock/`](rock/) | Chiselled Ubuntu [rock](https://documentation.ubuntu.com/rockcraft/) built with Rockcraft; Pebble runs the app as non-root. syft SBOM, Trivy scan, cosign signing. |
 | [`k8s/`](k8s/) | Deployment, Service and NetworkPolicy with a hardened pod spec; Sigstore policy-controller rejects images without a valid keyless signature. |
 | [`terraform/`](terraform/) | kubernetes + helm providers (local state): the app from `k8s/app`, kube-prometheus-stack, a blackbox `/healthz` probe and a Grafana dashboard. |
-| [`.github/workflows/`](.github/workflows/) | Multi-arch build on native runners, push to GHCR, scan, keyless signing through GitHub OIDC. |
+| [`.github/workflows/`](.github/workflows/) | `rock.yml`: multi-arch build on native runners, push to GHCR, scan, keyless signing through GitHub OIDC. `deploy.yml`: terraform fmt/validate, kubeconform, then a kind cluster running `k8s/kind-e2e.sh`. |
 
 Findings, numbers, commands, and gotchas are in [NOTES.md](NOTES.md).
 

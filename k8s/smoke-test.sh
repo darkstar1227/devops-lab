@@ -4,6 +4,8 @@
 set -euo pipefail
 
 NS=${NS:-hello}
+# Optional KUBE_CONTEXT targets a cluster other than the current context.
+kubectl() { command kubectl ${KUBE_CONTEXT:+--context "$KUBE_CONTEXT"} "$@"; }
 IMAGE=$(kubectl -n "$NS" get deploy fastapi-hello -o jsonpath='{.spec.template.spec.containers[0].image}')
 fail=0
 pass() { echo "PASS: $*"; }

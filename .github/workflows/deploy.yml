@@ -1,0 +1,81 @@
+name: Validate and test deployment
+
+on:
+  push:
+    branches: [main]
+    paths: ["k8s/**", "terraform/**", ".github/workflows/deploy.yml"]
+  pull_request:
+    paths: ["k8s/**", "terraform/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.16.6
+  KUBECONFORM_VERSION: v0.8.0
+  KIND_VERSION: v0.33.0
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt and validate
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive -diff
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL -o kubeconform.tgz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf kubeconform.tgz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: kubeconform (strict)
+        run: |
+          kubectl kustomize k8s/app | kubeconform -strict -summary -kubernetes-version 1.35.0
+          # ClusterImagePolicy schemas are generated from the chart's own CRDs
+          # (k8s/schemas/generate.py); the community catalog is out of date.
+          kubeconform -strict -summary \
+            -schema-location 'k8s/schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            k8s/policy/clusterimagepolicy.yaml
+
+  kind-e2e:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - uses: azure/setup-helm@v4
+
+      - uses: helm/kind-action@v1
+        with:
+          version: ${{ env.KIND_VERSION }}
+          cluster_name: devops-lab
+          wait: 120s
+
+      - name: Deploy with Terraform, check admission, scrapes and smoke test
+        run: KUBE_CONTEXT=kind-devops-lab k8s/kind-e2e.sh
+
+      - name: Debug on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n hello describe pods | tail -60
+          kubectl get events -A --sort-by=.lastTimestamp | tail -40

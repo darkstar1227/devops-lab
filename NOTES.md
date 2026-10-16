@@ -173,6 +173,43 @@ Terraform 1.16.6 (official zip, SHA256 checked; the GPG signature on SHA256SUMS 
 - No load test; latency panels only see probe traffic.
 - policy-controller is still outside Terraform, so `terraform destroy` leaves it, and its `no-match-policy: deny` still applies to the `hello` namespace.
 
+## 9. CI: validation and an ephemeral kind cluster (2026-10-15)
+
+Workflow `.github/workflows/deploy.yml` runs on changes under `k8s/` or `terraform/`.
+
+- `validate` job:
+  - `terraform fmt -check`, plus `init -backend=false` and `validate`.
+  - `kubeconform -strict` on `kubectl kustomize k8s/app` (6 resources).
+  - The `ClusterImagePolicy` is checked against the schemas generated from the chart's CRDs. Only the local schemas are used, so a missing schema fails the run instead of being skipped.
+- `kind-e2e` job:
+  - kind v0.33.0 cluster, then `k8s/kind-e2e.sh`.
+  - The script installs policy-controller and the policy, then runs `terraform apply` in a separate `e2e` workspace with `-var kube_context=kind-devops-lab`.
+  - It checks two admission denials and polls Prometheus until the 3 targets are up, then runs `k8s/smoke-test.sh`.
+  - `smoke-test.sh` now honours `KUBE_CONTEXT`.
+
+### Verified locally (same script, kind on OrbStack Docker, arm64)
+
+```text
+kind create cluster --name devops-lab        42s
+policy-controller 0.10.8 + ClusterImagePolicy installed
+terraform apply: 11 added
+PASS: nginx:1.27-alpine denied: no matching policies
+PASS: fastapi-hello@sha256:eca0f5b6... denied: no valid bundles
+up: blackbox probe, 10.244.0.10:8000/metrics, 10.244.0.11:8000/metrics
+6/6 smoke PASS (including both NetworkPolicy denials)
+k8s/kind-e2e.sh total                         6m24s, exit 0
+```
+
+- kind's default CNI (kindnet) enforced the NetworkPolicies: the unlabelled client and the app's egress were both blocked, the same result as on OrbStack.
+- The validate steps (fmt, kubeconform on both inputs) were run locally and passed.
+- The OrbStack stack was destroyed for the kind run (the VM has 4 GB) and re-applied afterwards: 11 added in 59s, smoke test 6 PASS.
+
+### Not verified (yet)
+
+- The workflow itself on GitHub runners (amd64): see the CI run result below once pushed.
+- No `terraform plan` against real state in CI; validate uses `-backend=false`.
+- The e2e cluster lives for one job; nothing tests upgrades or a second apply.
+
 ## Next
 
 - Close the OS-package gap: one chisel manifest covering every part, and check which scanner versions read it.
